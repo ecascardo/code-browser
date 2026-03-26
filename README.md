@@ -4,14 +4,26 @@ A local web application that lets you browse and read source code in your browse
 
 ## Features
 
+### File browsing
 - **File and folder navigation** with breadcrumbs, sorting (directories first), and a quick filter (press `/` to focus)
 - **Syntax highlighting** for 50+ languages via highlight.js
 - **Markdown preview** with a Code/Preview tab toggle, rendered with marked.js
 - **Mermaid diagram rendering** inside markdown files (flowcharts, sequence diagrams, etc.)
 - **Image preview** for PNG, JPG, SVG, GIF, and other common formats
-- **Three themes**: Dark, Light, and Solarized — persisted across sessions via localStorage
 - **Live reload**: automatically detects file changes and refreshes the current view
 - **Keyboard shortcuts**: `/` to filter, `Escape` to clear, browser back/forward navigation
+
+### Git integration
+- **Git status badges** in file listings: Modified, Added, and Deleted files are labeled with color-coded badges
+- **Base branch comparison**: a header dropdown (`vs:`) lets you pick a base branch (develop, main, or master) and shows which files differ from it with separate badges
+- **Diff viewer**: modified files get tabbed diff views — "Local changes" (uncommitted vs HEAD) and "vs [base]" (all changes since the branch diverged)
+- **Deleted file tracking**: files deleted in the working tree or vs the base branch still appear in the listing with a Deleted badge
+- **Branch display**: the current branch name is shown in the header
+- **PR link**: if a pull request exists for the current branch (detected via `gh` CLI), a clickable badge with the PR number and status (open/merged/closed) appears in the header
+- Graceful degradation: all git features are hidden when browsing a non-git directory
+
+### Appearance
+- **Three themes**: Dark, Light, and Solarized — persisted across sessions via localStorage
 - **Zero dependencies**: only requires Python 3 (CDN-loaded JS libraries for the frontend)
 
 ## Installation
