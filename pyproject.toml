@@ -26,6 +26,7 @@ classifiers = [
 
 [project.scripts]
 codebrowser = "codebrowser.server:main"
+codebrowser-uninstall = "codebrowser.server:uninstall_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

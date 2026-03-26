@@ -242,25 +242,71 @@ class BrowseHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
 
+CLAUDE_SKILL_CONTENT = """\
+Launch the Code Browser web server for browsing source code.
+
+Run `codebrowser $ARGUMENTS` using the Bash tool in the background.
+If no directory argument is given, use the current working directory.
+After starting, tell the user the URL (default: http://localhost:8888) and remind them to press Ctrl+C to stop the server.
+"""
+
+
+def cmd_install_claude(silent=False):
+    commands_dir = os.path.expanduser("~/.claude/commands")
+    os.makedirs(commands_dir, exist_ok=True)
+    skill_path = os.path.join(commands_dir, "codebrowser.md")
+    try:
+        with open(skill_path, "r", encoding="utf-8") as f:
+            current = f.read()
+    except FileNotFoundError:
+        current = None
+    if current == CLAUDE_SKILL_CONTENT:
+        return
+    with open(skill_path, "w", encoding="utf-8") as f:
+        f.write(CLAUDE_SKILL_CONTENT)
+    if not silent:
+        print(f"Skill installed: {skill_path}")
+        print("Use /codebrowser inside Claude Code to launch the browser.")
+
+
+def cmd_uninstall_claude():
+    skill_path = os.path.expanduser("~/.claude/commands/codebrowser.md")
+    if os.path.exists(skill_path):
+        os.remove(skill_path)
+        print(f"Skill removed: {skill_path}")
+    else:
+        print("Claude Code skill not found, nothing to remove.")
+
+
 def cmd_help():
     print("""Usage: codebrowser [directory] [options]
 
 Options:
-  --port PORT       Port to listen on (default: 8888)
-  --help, -h        Show this help message
+  --port PORT         Port to listen on (default: 8888)
+  --uninstall_claude  Remove the /codebrowser skill from Claude Code
+  --help, -h          Show this help message
 
 Examples:
   codebrowser                          Browse current directory
   codebrowser /path/to/project         Browse a specific directory
   codebrowser /path/to/project --port 3000
+  codebrowser --uninstall_claude       Remove Claude Code skill
 """)
 
+
+
+def uninstall_main():
+    cmd_uninstall_claude()
+    import subprocess
+    result = subprocess.run(["pipx", "uninstall", "codebrowser"])
+    sys.exit(result.returncode)
 
 
 def main():
     global ROOT_DIR, PORT, watcher
     args = sys.argv[1:]
     help_ = False
+    uninstall_claude = False
     i = 0
     while i < len(args):
         if args[i] == '--port' and i + 1 < len(args):
@@ -268,6 +314,9 @@ def main():
             i += 2
         elif args[i] in ('--help', '-h'):
             help_ = True
+            i += 1
+        elif args[i] == '--uninstall_claude':
+            uninstall_claude = True
             i += 1
         elif not args[i].startswith('-'):
             ROOT_DIR = os.path.abspath(args[i])
@@ -278,6 +327,15 @@ def main():
     if help_:
         cmd_help()
         return
+
+    if uninstall_claude:
+        cmd_uninstall_claude()
+        return
+
+    try:
+        cmd_install_claude(silent=True)
+    except Exception:
+        pass
 
     if not os.path.isdir(ROOT_DIR):
         print(f"Error: '{ROOT_DIR}' is not a valid directory.")

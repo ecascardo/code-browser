@@ -36,12 +36,6 @@ To install in development mode (changes to source take effect immediately):
 pipx install --editable . --pip-args="--index-url https://pypi.org/simple/"
 ```
 
-### Uninstall
-
-```bash
-pipx uninstall codebrowser
-```
-
 ## Usage
 
 ```bash
@@ -59,6 +53,28 @@ Then open `http://localhost:8888` (or your chosen port) in your browser.
 
 Press `Ctrl+C` to stop the server.
 
+## Claude Code Skill
+
+Code Browser includes a skill for [Claude Code](https://claude.ai/code) that lets you launch the server directly from the chat with the `/codebrowser` command.
+
+The skill is installed automatically at package installation time, creating `~/.claude/commands/codebrowser.md`. The command will be available in all your Claude Code sessions.
+
+### Usage
+
+Inside Claude Code, type:
+
+```
+/codebrowser
+```
+
+Claude will launch the server in the background pointing to the current directory and show you the URL (`http://localhost:8888`).
+
+You can also pass a directory as an argument:
+
+```
+/codebrowser /path/to/project
+```
+
 ## Ignored directories
 
 The following directories are excluded from the file listing:
@@ -68,5 +84,7 @@ The following directories are excluded from the file listing:
 ## Uninstall
 
 ```bash
-pipx uninstall codebrowser
+codebrowser-uninstall
 ```
+
+`codebrowser-uninstall` removes the `/codebrowser` skill from Claude Code and uninstalls the package.
