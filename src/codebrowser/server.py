@@ -13,9 +13,8 @@ import urllib.parse
 import threading
 import time
 import hashlib
-
 ROOT_DIR = os.getcwd()
-PORT = 8080
+PORT = 8888
 
 IGNORED = {'.git', 'node_modules', '__pycache__', '.DS_Store', '.idea', '.vscode', 'vendor', '.gradle', 'build', 'dist', '.next'}
 
@@ -243,19 +242,42 @@ class BrowseHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
 
+def cmd_help():
+    print("""Usage: codebrowser [directory] [options]
+
+Options:
+  --port PORT       Port to listen on (default: 8888)
+  --help, -h        Show this help message
+
+Examples:
+  codebrowser                          Browse current directory
+  codebrowser /path/to/project         Browse a specific directory
+  codebrowser /path/to/project --port 3000
+""")
+
+
+
 def main():
     global ROOT_DIR, PORT, watcher
     args = sys.argv[1:]
+    help_ = False
     i = 0
     while i < len(args):
         if args[i] == '--port' and i + 1 < len(args):
             PORT = int(args[i + 1])
             i += 2
+        elif args[i] in ('--help', '-h'):
+            help_ = True
+            i += 1
         elif not args[i].startswith('-'):
             ROOT_DIR = os.path.abspath(args[i])
             i += 1
         else:
             i += 1
+
+    if help_:
+        cmd_help()
+        return
 
     if not os.path.isdir(ROOT_DIR):
         print(f"Error: '{ROOT_DIR}' is not a valid directory.")
@@ -267,7 +289,6 @@ def main():
     import socket
     server = http.server.HTTPServer(('127.0.0.1', PORT), BrowseHandler)
     server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    name = os.path.basename(ROOT_DIR)
     print(f"\n  Code Browser")
     print(f"  Browsing: {ROOT_DIR}")
     print(f"  URL:      http://localhost:{PORT}")

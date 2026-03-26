@@ -19,21 +19,27 @@ A local web application that lets you browse and read source code in your browse
 ### From GitHub (no clone required)
 
 ```bash
-pip install git+https://github.com/ecascardo/code-browser.git
+pipx install git+https://github.com/ecascardo/code-browser.git --pip-args="--index-url https://pypi.org/simple/"
 ```
 
 ### From source
 
 ```bash
-pip install .
+pipx install . --pip-args="--index-url https://pypi.org/simple/"
 ```
 
-This installs the `codebrowser` command globally.
+This installs the `codebrowser` command in an isolated environment.
 
 To install in development mode (changes to source take effect immediately):
 
 ```bash
-pip install -e .
+pipx install --editable . --pip-args="--index-url https://pypi.org/simple/"
+```
+
+### Uninstall
+
+```bash
+pipx uninstall codebrowser
 ```
 
 ## Usage
@@ -45,17 +51,11 @@ codebrowser
 # Browse a specific directory
 codebrowser /path/to/your/project
 
-# Use a custom port (default: 8080)
-codebrowser /path/to/your/project --port 3000
+# Use a custom port (default: 8888)
+codebrowser --port 3000
 ```
 
-Then open `http://localhost:8080` (or your chosen port) in your browser.
-
-You can also run it as a Python module:
-
-```bash
-python -m codebrowser /path/to/your/project
-```
+Then open `http://localhost:8888` (or your chosen port) in your browser.
 
 Press `Ctrl+C` to stop the server.
 
@@ -68,5 +68,5 @@ The following directories are excluded from the file listing:
 ## Uninstall
 
 ```bash
-pip uninstall codebrowser
+pipx uninstall codebrowser
 ```
