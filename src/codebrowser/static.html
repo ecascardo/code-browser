@@ -102,6 +102,24 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Ar
 .file-row .name { flex:1; font-size:14px; color:var(--text-link); }
 .file-row .size { font-size:12px; color:var(--text-secondary); min-width:70px; text-align:right; }
 .parent-row .name { color:var(--text-secondary); }
+.git-badge { font-size:10px; font-weight:700; padding:1px 5px; border-radius:3px; flex-shrink:0; font-family:'SF Mono','Fira Code',monospace; }
+.git-badge-M { background:rgba(210,153,34,0.2); color:#d29922; }
+.git-badge-A { background:rgba(63,185,80,0.2); color:#3fb950; }
+.git-badge-D { background:rgba(248,81,73,0.2); color:#f85149; }
+.git-badge-base { opacity:0.65; border:1px solid currentColor; background:transparent !important; }
+
+/* Diff view */
+.diff-view { border:1px solid var(--border); border-top:none; border-radius:0 0 6px 6px; overflow:auto; max-height:calc(100vh - 220px); background:var(--bg-secondary); }
+.diff-table { width:100%; border-collapse:collapse; font-size:13px; font-family:'SF Mono','Fira Code','Fira Mono',Menlo,Consolas,monospace; }
+.diff-num { width:1%; min-width:44px; padding:0 10px; text-align:right; color:var(--line-num); user-select:none; border-right:1px solid var(--border); white-space:nowrap; line-height:20px; vertical-align:top; }
+.diff-code { padding:0 16px; white-space:pre; line-height:20px; }
+.diff-add { background:rgba(63,185,80,0.1); }
+.diff-add .diff-num { background:rgba(63,185,80,0.12); }
+.diff-num-add { color:#3fb950; }
+.diff-del { background:rgba(248,81,73,0.1); }
+.diff-del .diff-num { background:rgba(248,81,73,0.12); }
+.diff-num-del { color:#f85149; }
+.diff-hunk-row td { background:rgba(88,166,255,0.07); color:var(--text-link); padding:4px 16px; font-family:'SF Mono','Fira Code','Fira Mono',Menlo,Consolas,monospace; font-size:12px; }
 
 .code-header { display:flex; align-items:center; justify-content:space-between; padding:8px 16px; background:var(--bg-secondary); border:1px solid var(--border); border-top:none; }
 .code-header .file-info { font-size:12px; color:var(--text-secondary); }
@@ -168,6 +186,15 @@ pre code.hljs { background:transparent !important; padding:0 !important; }
 .md-preview .mermaid-rendered svg { max-width:100%; height:auto; }
 .md-preview .mermaid-error { background:var(--code-bg); border:1px solid #f85149; border-radius:6px; margin:0 0 16px; }
 
+/* Branch + PR header */
+.branch-info { display:flex; align-items:center; gap:8px; }
+.branch-name { display:flex; align-items:center; gap:5px; font-size:13px; color:var(--text); font-family:'SF Mono','Fira Code',monospace; }
+.branch-name svg { fill:var(--text-secondary); flex-shrink:0; }
+.pr-badge { font-size:12px; font-weight:600; padding:1px 10px; border-radius:12px; text-decoration:none; white-space:nowrap; }
+.pr-badge-open { background:rgba(63,185,80,0.15); color:#3fb950; border:1px solid rgba(63,185,80,0.4); }
+.pr-badge-merged { background:rgba(137,87,229,0.15); color:#a371f7; border:1px solid rgba(137,87,229,0.4); }
+.pr-badge-closed { background:rgba(248,81,73,0.15); color:#f85149; border:1px solid rgba(248,81,73,0.4); }
+
 /* === Server offline overlay === */
 .offline-overlay { display:none; position:fixed; inset:0; z-index:9999; background:var(--bg); flex-direction:column; align-items:center; justify-content:center; gap:16px; }
 .offline-overlay.show { display:flex; }
@@ -193,7 +220,13 @@ pre code.hljs { background:transparent !important; padding:0 !important; }
           <option value="solarized">Solarized</option>
         </select>
       </div>
-      <span class="header-subtitle" id="rootPath"></span>
+      <div class="theme-select" style="display:none">
+        <label for="baseSelector">vs:</label>
+        <select id="baseSelector" onchange="setBaseBranch(this.value)">
+          <option value="">— none —</option>
+        </select>
+      </div>
+      <div class="branch-info" id="branchInfo"></div>
     </div>
   </div>
 </div>
@@ -329,7 +362,46 @@ function loadSavedTheme() {
 
 /* ========== App state ========== */
 
-var state = { path: '', entries: [], fileContent: null, root: '' };
+var state = { path: '', entries: [], fileContent: null, root: '', baseBranch: '' };
+
+function setBaseBranch(branch) {
+  state.baseBranch = branch;
+  navigate(state.path);
+}
+
+function populateBaseSelector(branches, selectedBase) {
+  var container = document.getElementById('baseSelector').parentNode;
+  var sel = document.getElementById('baseSelector');
+  if (!branches || branches.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+  container.style.display = '';
+  sel.innerHTML = '';
+  branches.forEach(function(b) {
+    var opt = document.createElement('option');
+    opt.value = b;
+    opt.textContent = b;
+    if (b === selectedBase) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  if (!selectedBase && branches.length > 0) {
+    state.baseBranch = branches[0];
+  }
+}
+
+function updateBranchInfo(info) {
+  var branch = info.current_branch || '';
+  if (!branch) { document.getElementById('branchInfo').innerHTML = ''; return; }
+  var branchIcon = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>';
+  var html = '<span class="branch-name">' + branchIcon + escapeHtml(branch) + '</span>';
+  if (info.pr_number) {
+    var stateClass = {OPEN: 'open', MERGED: 'merged', CLOSED: 'closed'}[info.pr_state] || 'open';
+    var prIcon = '<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"/></svg>';
+    html += '<a href="' + escapeHtml(info.pr_url) + '" target="_blank" class="pr-badge pr-badge-' + stateClass + '">' + prIcon + ' #' + info.pr_number + '</a>';
+  }
+  document.getElementById('branchInfo').innerHTML = html;
+}
 
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
@@ -397,9 +469,21 @@ function renderDir(entries, filter) {
   for (var i = 0; i < sorted.length; i++) {
     var entry = sorted[i];
     var entryPath = state.path ? state.path + '/' + entry.name : entry.name;
+    var gitLabels = {M: 'Modified', A: 'Added', D: 'Deleted'};
+    var gitBadge = '';
+    if (entry.git_status) {
+      gitBadge = '<span class="git-badge git-badge-' + entry.git_status + '">' + (gitLabels[entry.git_status] || entry.git_status) + '</span>';
+    }
+    var baseBadge = '';
+    if (entry.git_status_base) {
+      var baseLabel = (state.baseBranch ? state.baseBranch + ':' : 'base:') + (gitLabels[entry.git_status_base] || entry.git_status_base);
+      baseBadge = '<span class="git-badge git-badge-' + entry.git_status_base + ' git-badge-base">' + baseLabel + '</span>';
+    }
     html += '<div class="file-row" onclick="navigate(\'' + entryPath.replace(/'/g, "\\'") + '\')">';
     html += '<span class="icon">' + (entry.is_dir ? dirIcon() : fileIcon()) + '</span>';
     html += '<span class="name">' + escapeHtml(entry.name) + '</span>';
+    html += gitBadge;
+    html += baseBadge;
     html += '<span class="size">' + (entry.is_dir ? '' : formatSize(entry.size)) + '</span>';
     html += '</div>';
   }
@@ -508,6 +592,54 @@ function switchMdTab(tab) {
   }
 }
 
+/* ========== Diff rendering ========== */
+
+function renderDiff(diffText) {
+  if (!diffText || !diffText.trim()) return '<div class="binary-msg">No changes to show.</div>';
+  var lines = diffText.split('\n');
+  var html = '<table class="diff-table">';
+  var oldLine = 0, newLine = 0;
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (i === lines.length - 1 && line === '') continue;
+    if (/^(diff --git|index |--- |\+\+\+ )/.test(line)) continue;
+    if (line.startsWith('@@')) {
+      var m = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (m) { oldLine = parseInt(m[1]); newLine = parseInt(m[2]); }
+      html += '<tr class="diff-hunk-row"><td colspan="3">' + escapeHtml(line) + '</td></tr>';
+    } else if (line.startsWith('+')) {
+      html += '<tr class="diff-add"><td class="diff-num"></td><td class="diff-num diff-num-add">' + (newLine++) + '</td><td class="diff-code">' + escapeHtml(line) + '</td></tr>';
+    } else if (line.startsWith('-')) {
+      html += '<tr class="diff-del"><td class="diff-num diff-num-del">' + (oldLine++) + '</td><td class="diff-num"></td><td class="diff-code">' + escapeHtml(line) + '</td></tr>';
+    } else if (line === '\\ No newline at end of file') {
+      html += '<tr><td class="diff-num"></td><td class="diff-num"></td><td class="diff-code" style="color:var(--text-secondary)">' + escapeHtml(line) + '</td></tr>';
+    } else {
+      html += '<tr><td class="diff-num">' + (oldLine++) + '</td><td class="diff-num">' + (newLine++) + '</td><td class="diff-code">' + escapeHtml(line) + '</td></tr>';
+    }
+  }
+  html += '</table>';
+  return '<div class="diff-view">' + html + '</div>';
+}
+
+function loadDiff(panelId, mode) {
+  var url = '/api/diff?path=' + encodeURIComponent(state.path);
+  if (mode) url += '&mode=' + encodeURIComponent(mode);
+  if (mode === 'base' && state.baseBranch) url += '&base=' + encodeURIComponent(state.baseBranch);
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var panel = document.getElementById(panelId);
+      if (!panel) return;
+      panel.innerHTML = data.error
+        ? '<div class="binary-msg">Error: ' + escapeHtml(data.error) + '</div>'
+        : renderDiff(data.diff);
+    })
+    .catch(function(e) {
+      var panel = document.getElementById(panelId);
+      if (panel) panel.innerHTML = '<div class="binary-msg">Error loading diff.</div>';
+    });
+}
+
 /* ========== File rendering ========== */
 
 function renderFile(data) {
@@ -523,6 +655,12 @@ function renderFile(data) {
     return html;
   }
 
+  var diffIcon = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8.75 1.75a.75.75 0 0 0-1.5 0V5H4a.75.75 0 0 0 0 1.5h3.25v3.25a.75.75 0 0 0 1.5 0V6.5H12A.75.75 0 0 0 12 5H8.75V1.75ZM4 9.75a.75.75 0 0 0 0 1.5h8a.75.75 0 0 0 0-1.5H4Z"/></svg>';
+
+  var baseBranchLabel = data.base_branch || 'base';
+  var hasLocalChanges = data.git_status === 'M' || data.git_status === 'A';
+  var hasBaseChanges = !!data.git_status_base;
+
   if (isMarkdown(data)) {
     var codeIcon = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25ZM7.25 8h1.5v2.75a.25.25 0 0 0 .25.25h1a.25.25 0 0 0 .177-.427L8.384 8.776a.544.544 0 0 0-.768 0l-1.793 1.797A.25.25 0 0 0 6 11h1a.25.25 0 0 0 .25-.25Zm-1-2.5h5.5a.75.75 0 0 0 0-1.5h-5.5a.75.75 0 0 0 0 1.5Z"/></svg>';
     var previewIcon = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2c1.981 0 3.671.992 4.933 2.078 1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.45.678-1.367 1.932-2.637 3.023C11.67 13.008 9.981 14 8 14c-1.981 0-3.671-.992-4.933-2.078C1.797 10.83.88 9.576.43 8.898a1.62 1.62 0 0 1 0-1.798c.45-.677 1.367-1.931 2.637-3.022C4.33 2.992 6.019 2 8 2ZM1.679 7.932a.12.12 0 0 0 0 .136c.411.622 1.241 1.75 2.366 2.717C5.176 11.758 6.527 12.5 8 12.5c1.473 0 2.825-.742 3.955-1.715 1.124-.967 1.954-2.096 2.366-2.717a.12.12 0 0 0 0-.136c-.412-.621-1.242-1.75-2.366-2.717C10.824 4.242 9.473 3.5 8 3.5c-1.473 0-2.824.742-3.955 1.715-1.124.967-1.954 2.096-2.366 2.717ZM8 10a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 10Z"/></svg>';
@@ -530,9 +668,45 @@ function renderFile(data) {
     html += '<div class="md-tabs">';
     html += '<div class="md-tab active" data-tab="preview" onclick="switchMdTab(\'preview\')">' + previewIcon + ' Preview</div>';
     html += '<div class="md-tab" data-tab="code" onclick="switchMdTab(\'code\')">' + codeIcon + ' Code</div>';
+    if (hasLocalChanges) {
+      html += '<div class="md-tab" data-tab="changes" onclick="switchMdTab(\'changes\')">' + diffIcon + ' Local changes</div>';
+    }
+    if (hasBaseChanges) {
+      html += '<div class="md-tab" data-tab="base" onclick="switchMdTab(\'base\')">' + diffIcon + ' vs ' + escapeHtml(baseBranchLabel) + '</div>';
+    }
     html += '</div>';
     html += '<div id="md-panel-preview" class="md-panel active">' + buildMarkdownPreview(data, 'md-preview-content') + '</div>';
     html += '<div id="md-panel-code" class="md-panel">' + buildCodeView(data, 'md-code-content') + '</div>';
+    if (hasLocalChanges) {
+      html += '<div id="md-panel-changes" class="md-panel"><div class="binary-msg">Loading diff...</div></div>';
+      setTimeout(function() { loadDiff('md-panel-changes', 'local'); }, 0);
+    }
+    if (hasBaseChanges) {
+      html += '<div id="md-panel-base" class="md-panel"><div class="binary-msg">Loading diff...</div></div>';
+      setTimeout(function() { loadDiff('md-panel-base', 'base'); }, 0);
+    }
+    return html;
+  }
+
+  if (hasLocalChanges || hasBaseChanges) {
+    html += '<div class="md-tabs">';
+    html += '<div class="md-tab active" data-tab="code" onclick="switchMdTab(\'code\')">Code</div>';
+    if (hasLocalChanges) {
+      html += '<div class="md-tab" data-tab="changes" onclick="switchMdTab(\'changes\')">' + diffIcon + ' Local changes</div>';
+    }
+    if (hasBaseChanges) {
+      html += '<div class="md-tab" data-tab="base" onclick="switchMdTab(\'base\')">' + diffIcon + ' vs ' + escapeHtml(baseBranchLabel) + '</div>';
+    }
+    html += '</div>';
+    html += '<div id="md-panel-code" class="md-panel active">' + buildCodeView(data, 'code-content') + '</div>';
+    if (hasLocalChanges) {
+      html += '<div id="md-panel-changes" class="md-panel"><div class="binary-msg">Loading diff...</div></div>';
+      setTimeout(function() { loadDiff('md-panel-changes', 'local'); }, 0);
+    }
+    if (hasBaseChanges) {
+      html += '<div id="md-panel-base" class="md-panel"><div class="binary-msg">Loading diff...</div></div>';
+      setTimeout(function() { loadDiff('md-panel-base', 'base'); }, 0);
+    }
     return html;
   }
 
@@ -546,7 +720,9 @@ function navigate(path) {
   document.getElementById('searchInput').value = '';
   document.getElementById('loading').classList.add('show');
 
-  fetch('/api/browse?path=' + encodeURIComponent(path))
+  var browseUrl = '/api/browse?path=' + encodeURIComponent(path);
+  if (state.baseBranch) browseUrl += '&base=' + encodeURIComponent(state.baseBranch);
+  fetch(browseUrl)
     .then(function(resp) { return resp.json(); })
     .then(function(data) {
       if (data.error) {
@@ -560,11 +736,11 @@ function navigate(path) {
       }
 
       state.path = path;
-      document.getElementById('rootPath').textContent = path ? state.root + '/' + path : state.root;
 
       if (data.type === 'directory') {
         state.entries = data.entries;
         state.fileContent = null;
+        if (data.base_branch) state.baseBranch = data.base_branch;
         renderBreadcrumb(path);
         document.getElementById('content').innerHTML = renderDir(data.entries, '');
       } else {
@@ -631,9 +807,10 @@ function setServerOnline(online) {
       .then(function(info) {
         state.root = info.root;
         state.name = info.name;
+        state.baseBranch = info.base_branch || '';
         document.getElementById('repoName').textContent = info.name;
-        document.getElementById('rootPath').textContent = state.path ? info.root + '/' + state.path : info.root;
         document.title = info.name + ' - Code Browser';
+        updateBranchInfo(info);
         navigate(state.path);
         document.getElementById('offlineOverlay').classList.remove('show');
       });
@@ -667,9 +844,16 @@ fetch('/api/info')
   .then(function(info) {
     state.root = info.root;
     state.name = info.name;
+    state.baseBranch = info.base_branch || '';
     document.getElementById('repoName').textContent = info.name;
-    document.getElementById('rootPath').textContent = info.root;
     document.title = info.name + ' - Code Browser';
+    updateBranchInfo(info);
+
+    fetch('/api/branches')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        populateBaseSelector(data.branches || [], state.baseBranch);
+      });
 
     var params = new URLSearchParams(location.search);
     navigate(params.get('path') || '');

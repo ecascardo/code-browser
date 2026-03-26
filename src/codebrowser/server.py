@@ -13,6 +13,7 @@ import urllib.parse
 import threading
 import time
 import hashlib
+import subprocess
 ROOT_DIR = os.getcwd()
 PORT = 8888
 
@@ -99,6 +100,139 @@ class FileWatcher:
 watcher = None  # initialized in main()
 
 
+def get_git_status(root):
+    """Returns dict mapping relative filepath -> simplified git status (M/A/D)."""
+    try:
+        result = subprocess.run(
+            ['git', 'status', '--porcelain'],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode != 0:
+            return {}
+        status_map = {}
+        for line in result.stdout.splitlines():
+            if len(line) < 4:
+                continue
+            x, y = line[0], line[1]
+            filepath = line[3:]
+            if ' -> ' in filepath:
+                filepath = filepath.split(' -> ')[1]
+            filepath = filepath.strip('"')
+            if x == '?' and y == '?':
+                status = 'A'
+            elif x == 'D' or y == 'D':
+                status = 'D'
+            elif x == 'A' or y == 'A':
+                status = 'A'
+            else:
+                status = 'M'
+            status_map[filepath] = status
+        return status_map
+    except Exception:
+        return {}
+
+
+def get_current_branch(root):
+    """Returns the current git branch name or empty string."""
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+            cwd=root, capture_output=True, text=True, timeout=5
+        )
+        return result.stdout.strip() if result.returncode == 0 else ''
+    except Exception:
+        return ''
+
+
+def get_pr_info(root):
+    """Returns (number, url, state) of the current branch's PR using gh CLI, or (None, None, None)."""
+    try:
+        result = subprocess.run(
+            ['gh', 'pr', 'view', '--json', 'number,url,state'],
+            cwd=root, capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            return data.get('number'), data.get('url', ''), data.get('state', '')
+    except Exception:
+        pass
+    return None, None, None
+
+
+def get_all_branches(root):
+    """Returns list of local branch names."""
+    try:
+        result = subprocess.run(
+            ['git', 'branch', '--format=%(refname:short)'],
+            cwd=root, capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            return []
+        return [b.strip() for b in result.stdout.splitlines() if b.strip()]
+    except Exception:
+        return []
+
+
+def get_base_branch(root):
+    """Returns the name of the upstream base branch (develop/main/master) or None."""
+    for branch in ['develop', 'main', 'master']:
+        result = subprocess.run(
+            ['git', 'rev-parse', '--verify', branch],
+            cwd=root, capture_output=True, timeout=5
+        )
+        if result.returncode == 0:
+            return branch
+    return None
+
+
+def get_merge_base(root, base_branch):
+    """Returns the merge-base commit hash between HEAD and base_branch, or None."""
+    try:
+        result = subprocess.run(
+            ['git', 'merge-base', 'HEAD', base_branch],
+            cwd=root, capture_output=True, text=True, timeout=5
+        )
+        return result.stdout.strip() if result.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def get_git_status_base(root, base_branch=None):
+    """Returns (status_map, base_branch) where status_map maps filepath -> M/A/D vs base branch merge-base."""
+    base = base_branch or get_base_branch(root)
+    if not base:
+        return {}, None
+    merge_base = get_merge_base(root, base)
+    if not merge_base:
+        return {}, base
+    try:
+        result = subprocess.run(
+            ['git', 'diff', '--name-status', merge_base],
+            cwd=root, capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            return {}, base
+        status_map = {}
+        for line in result.stdout.splitlines():
+            parts = line.split('\t')
+            if len(parts) < 2:
+                continue
+            st = parts[0][0]
+            filepath = parts[-1]
+            if st == 'D':
+                status_map[filepath] = 'D'
+            elif st == 'A':
+                status_map[filepath] = 'A'
+            else:
+                status_map[filepath] = 'M'
+        return status_map, base
+    except Exception:
+        return {}, base
+
+
 def get_html_template():
     html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static.html')
     with open(html_path, 'r', encoding='utf-8') as f:
@@ -160,15 +294,33 @@ class BrowseHandler(http.server.BaseHTTPRequestHandler):
 
         if path == '/api/info':
             name = os.path.basename(ROOT_DIR) or 'root'
-            self.send_json({'name': name, 'root': ROOT_DIR})
+            base = get_base_branch(ROOT_DIR)
+            branch = get_current_branch(ROOT_DIR)
+            pr_number, pr_url, pr_state = get_pr_info(ROOT_DIR)
+            self.send_json({
+                'name': name,
+                'root': ROOT_DIR,
+                'base_branch': base or '',
+                'current_branch': branch,
+                'pr_number': pr_number,
+                'pr_url': pr_url or '',
+                'pr_state': pr_state or '',
+            })
             return
 
         if path == '/api/changes':
             self.send_json({'change_id': watcher.change_id if watcher else 0})
             return
 
+        if path == '/api/branches':
+            all_branches = get_all_branches(ROOT_DIR)
+            base_candidates = [b for b in ['develop', 'main', 'master'] if b in all_branches]
+            self.send_json({'branches': base_candidates})
+            return
+
         if path == '/api/browse':
             rel = params.get('path', [''])[0]
+            base_override = params.get('base', [''])[0] or None
             full = self.get_safe_path(rel)
             if not full or not os.path.exists(full):
                 self.send_json({'error': 'Path not found'}, 404)
@@ -176,6 +328,13 @@ class BrowseHandler(http.server.BaseHTTPRequestHandler):
 
             if os.path.isdir(full):
                 entries = []
+                git_status = get_git_status(ROOT_DIR)
+                git_status_base, base_branch = get_git_status_base(ROOT_DIR, base_override)
+                priority = {'D': 3, 'M': 2, 'A': 1}
+                # Prefix for entries in the current directory (relative to ROOT_DIR)
+                dir_rel = rel.replace(os.sep, '/').strip('/')
+                dir_prefix = (dir_rel + '/') if dir_rel else ''
+                seen_names = set()
                 try:
                     for item in os.listdir(full):
                         if item in IGNORED:
@@ -183,15 +342,51 @@ class BrowseHandler(http.server.BaseHTTPRequestHandler):
                         item_path = os.path.join(full, item)
                         is_dir = os.path.isdir(item_path)
                         size = 0 if is_dir else os.path.getsize(item_path)
+                        rel_item = os.path.relpath(item_path, ROOT_DIR).replace(os.sep, '/')
+                        git_st = None
+                        git_st_base = None
+                        if is_dir:
+                            prefix = rel_item + '/'
+                            for k, v in git_status.items():
+                                if k.startswith(prefix):
+                                    if git_st is None or priority.get(v, 0) > priority.get(git_st, 0):
+                                        git_st = v
+                            for k, v in git_status_base.items():
+                                if k.startswith(prefix):
+                                    if git_st_base is None or priority.get(v, 0) > priority.get(git_st_base, 0):
+                                        git_st_base = v
+                        else:
+                            git_st = git_status.get(rel_item)
+                            git_st_base = git_status_base.get(rel_item)
+                        seen_names.add(item)
                         entries.append({
                             'name': item,
                             'is_dir': is_dir,
                             'size': size,
+                            'git_status': git_st,
+                            'git_status_base': git_st_base,
                         })
                 except PermissionError:
                     self.send_json({'error': 'Permission denied'}, 403)
                     return
-                self.send_json({'type': 'directory', 'entries': entries})
+                # Add deleted files tracked by git that no longer exist on disk
+                all_deleted = {p: s for p, s in {**git_status_base, **git_status}.items() if s == 'D'}
+                for git_path, git_st in all_deleted.items():
+                    if not git_path.startswith(dir_prefix):
+                        continue
+                    remainder = git_path[len(dir_prefix):]
+                    if '/' in remainder:
+                        continue  # belongs to a subdirectory, not direct child
+                    if remainder in seen_names:
+                        continue
+                    entries.append({
+                        'name': remainder,
+                        'is_dir': False,
+                        'size': 0,
+                        'git_status': git_status.get(git_path),
+                        'git_status_base': git_status_base.get(git_path),
+                    })
+                self.send_json({'type': 'directory', 'entries': entries, 'base_branch': base_branch or ''})
             else:
                 ext = os.path.splitext(full)[1].lower()
                 size = os.path.getsize(full)
@@ -209,6 +404,10 @@ class BrowseHandler(http.server.BaseHTTPRequestHandler):
                     except Exception:
                         is_bin = True
 
+                rel_file = os.path.relpath(full, ROOT_DIR).replace(os.sep, '/')
+                git_st = get_git_status(ROOT_DIR).get(rel_file)
+                git_status_base, base_branch = get_git_status_base(ROOT_DIR, base_override)
+                git_st_base = git_status_base.get(rel_file)
                 self.send_json({
                     'type': 'file',
                     'content': content,
@@ -217,7 +416,42 @@ class BrowseHandler(http.server.BaseHTTPRequestHandler):
                     'language': lang,
                     'is_binary': is_bin,
                     'is_image': is_image,
+                    'git_status': git_st,
+                    'git_status_base': git_st_base,
+                    'base_branch': base_branch or '',
                 })
+            return
+
+        if path == '/api/diff':
+            rel = params.get('path', [''])[0]
+            mode = params.get('mode', ['local'])[0]
+            base_override = params.get('base', [''])[0] or None
+            full = self.get_safe_path(rel)
+            if not full:
+                self.send_json({'error': 'Invalid path'}, 400)
+                return
+            try:
+                if mode == 'base':
+                    base = base_override or get_base_branch(ROOT_DIR)
+                    if not base:
+                        self.send_json({'diff': '', 'info': 'No base branch found'})
+                        return
+                    merge_base = get_merge_base(ROOT_DIR, base)
+                    if not merge_base:
+                        self.send_json({'diff': ''})
+                        return
+                    result = subprocess.run(
+                        ['git', 'diff', merge_base, '--', rel],
+                        cwd=ROOT_DIR, capture_output=True, text=True, timeout=10
+                    )
+                else:
+                    result = subprocess.run(
+                        ['git', 'diff', 'HEAD', '--', rel],
+                        cwd=ROOT_DIR, capture_output=True, text=True, timeout=10
+                    )
+                self.send_json({'diff': result.stdout})
+            except Exception as e:
+                self.send_json({'error': str(e)}, 500)
             return
 
         if path == '/api/raw':
