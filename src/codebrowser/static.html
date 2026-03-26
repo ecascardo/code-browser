@@ -167,6 +167,15 @@ pre code.hljs { background:transparent !important; padding:0 !important; }
 .md-preview .mermaid-rendered { background:var(--code-bg); border:1px solid var(--border); border-radius:6px; padding:16px; margin:0 0 16px; text-align:center; overflow-x:auto; }
 .md-preview .mermaid-rendered svg { max-width:100%; height:auto; }
 .md-preview .mermaid-error { background:var(--code-bg); border:1px solid #f85149; border-radius:6px; margin:0 0 16px; }
+
+/* === Server offline overlay === */
+.offline-overlay { display:none; position:fixed; inset:0; z-index:9999; background:var(--bg); flex-direction:column; align-items:center; justify-content:center; gap:16px; }
+.offline-overlay.show { display:flex; }
+.offline-icon { opacity:.4; }
+.offline-title { font-size:22px; font-weight:600; color:var(--text); }
+.offline-subtitle { font-size:14px; color:var(--text-secondary); }
+.offline-dot { display:inline-block; width:10px; height:10px; border-radius:50%; background:#f85149; margin-right:6px; animation:pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 </style>
 </head>
 <body>
@@ -198,6 +207,12 @@ pre code.hljs { background:transparent !important; padding:0 !important; }
 </div>
 
 <div class="loading" id="loading">Loading...</div>
+
+<div class="offline-overlay" id="offlineOverlay">
+  <svg class="offline-icon" height="64" viewBox="0 0 16 16" width="64" fill="currentColor"><path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z"></path></svg>
+  <div class="offline-title"><span class="offline-dot"></span>Server offline</div>
+  <div class="offline-subtitle">The Code Browser server has stopped. Waiting for it to come back...</div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
@@ -314,7 +329,7 @@ function loadSavedTheme() {
 
 /* ========== App state ========== */
 
-var state = { path: '', entries: [], fileContent: null };
+var state = { path: '', entries: [], fileContent: null, root: '' };
 
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
@@ -535,11 +550,17 @@ function navigate(path) {
     .then(function(resp) { return resp.json(); })
     .then(function(data) {
       if (data.error) {
-        document.getElementById('content').innerHTML = '<div class="binary-msg">' + escapeHtml(data.error) + '</div>';
+        if (path !== '') {
+          window.location.href = '/';
+        } else {
+          renderBreadcrumb('');
+          document.getElementById('content').innerHTML = '<div class="binary-msg">' + escapeHtml(data.error) + '</div>';
+        }
         return;
       }
 
       state.path = path;
+      document.getElementById('rootPath').textContent = path ? state.root + '/' + path : state.root;
 
       if (data.type === 'directory') {
         state.entries = data.entries;
@@ -596,22 +617,43 @@ document.addEventListener('keydown', function(e) {
 /* ========== Live reload ========== */
 
 var lastChangeId = -1;
+var serverOnline = true;
+
+function setServerOnline(online) {
+  if (online === serverOnline) return;
+  serverOnline = online;
+  if (!online) {
+    document.getElementById('offlineOverlay').classList.add('show');
+  } else {
+    // Server came back — refresh content first, then hide overlay to avoid flicker
+    fetch('/api/info')
+      .then(function(resp) { return resp.json(); })
+      .then(function(info) {
+        state.root = info.root;
+        state.name = info.name;
+        document.getElementById('repoName').textContent = info.name;
+        document.getElementById('rootPath').textContent = state.path ? info.root + '/' + state.path : info.root;
+        document.title = info.name + ' - Code Browser';
+        navigate(state.path);
+        document.getElementById('offlineOverlay').classList.remove('show');
+      });
+  }
+}
 
 function pollChanges() {
   fetch('/api/changes')
     .then(function(resp) { return resp.json(); })
     .then(function(data) {
+      setServerOnline(true);
       var cid = data.change_id;
       if (lastChangeId === -1) {
-        // First poll, just store
         lastChangeId = cid;
       } else if (cid !== lastChangeId) {
         lastChangeId = cid;
-        // Re-navigate to current path to refresh content
         navigate(state.path);
       }
     })
-    .catch(function() { /* server down, ignore */ });
+    .catch(function() { setServerOnline(false); });
 }
 
 setInterval(pollChanges, 2000);
@@ -623,6 +665,8 @@ loadSavedTheme();
 fetch('/api/info')
   .then(function(resp) { return resp.json(); })
   .then(function(info) {
+    state.root = info.root;
+    state.name = info.name;
     document.getElementById('repoName').textContent = info.name;
     document.getElementById('rootPath').textContent = info.root;
     document.title = info.name + ' - Code Browser';
